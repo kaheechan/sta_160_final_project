@@ -8,7 +8,8 @@
 4. Eyoel Abraha - Graphs for Presentation 2
 
 ## Steps to compile the code
-1. Open the file final_project2-final.Rmd and Run All
-2. Open the file markov.Rmd and Run All
+1. Open the R file final_project2-final.Rmd and Run All
+2. Open the R file markov.Rmd and Run All
+3. Open the Python file and compile using -python k-means.py
 
 
