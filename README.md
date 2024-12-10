@@ -7,3 +7,7 @@
 ### Ivan Louize Winoto - Literature Review for Presentation 1, Introduction for Final Report
 ### Eyoel Abraha - Graphs for Presentation 2
 
+## Steps to compile the code
+### Open the file final_project2-final.Rmd and Run All
+### Open the file markov.Rmd and Run All
+
