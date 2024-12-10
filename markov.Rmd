@@ -1,0 +1,331 @@
+---
+title: "final_2"
+author: "Kahee Chan"
+date: "2024-11-12"
+output: html_document
+---
+
+# Markov Chain
+
+```{r}
+colnames(main_df)
+```
+
+
+```{r}
+mrwhite_df <- main_df[, c("MrWhite_BLIND", "MrWhite_PREFLOP", "MrWhite_FLOP", "MrWhite_TURN", "MrWhite_RIVER", "MrWhite_SHOWDOWN")]
+gogo_df <- main_df[, c("Gogo_BLIND", "Gogo_PREFLOP", "Gogo_FLOP", "Gogo_TURN", "Gogo_RIVER", "Gogo_SHOWDOWN")]
+budd_df <- main_df[, c("Budd_BLIND", "Budd_PREFLOP", "Budd_FLOP", "Budd_TURN", "Budd_RIVER", "Budd_SHOWDOWN")]
+eddie_df <- main_df[, c("Eddie_BLIND", "Eddie_PREFLOP", "Eddie_FLOP", "Eddie_TURN", "Eddie_RIVER", "Eddie_SHOWDOWN")]
+bill_df <- main_df[, c("Bill_BLIND", "Bill_PREFLOP", "Bill_FLOP", "Bill_TURN", "Bill_RIVER", "Bill_SHOWDOWN")]
+mrblue_df <- main_df[, c("MrBlue_BLIND", "MrBlue_PREFLOP", "MrBlue_FLOP", "MrBlue_TURN", "MrBlue_RIVER", "MrBlue_SHOWDOWN")]
+mrblonde_df <- main_df[, c("MrBlonde_BLIND", "MrBlonde_PREFLOP", "MrBlonde_FLOP", "MrBlonde_RIVER", "MrBlonde_SHOWDOWN")]
+mrpink_df <- main_df[, c("MrPink_BLIND", "MrPink_PREFLOP", "MrPink_FLOP", "MrPink_TURN", "MrPink_RIVER", "MrPink_SHOWDOWN")]
+mrorange_df <- main_df[, c("MrOrange_BLIND", "MrOrange_PREFLOP", "MrOrange_FLOP", "MrOrange_TURN", "MrOrange_RIVER", "MrOrange_SHOWDOWN")]
+mrbrown_df <- main_df[, c("MrBrown_BLIND", "MrBrown_PREFLOP", "MrBrown_FLOP", "MrBrown_TURN", "MrBrown_RIVER", "MrBrown_SHOWDOWN")]
+hattori_df <- main_df[, c("Hattori_BLIND", "Hattori_PREFLOP", "Hattori_FLOP", "Hattori_TURN", "Hattori_RIVER", "Hattori_SHOWDOWN")]
+oren_df <- main_df[, c("ORen_BLIND", "ORen_PREFLOP", "ORen_FLOP", "ORen_TURN", "ORen_RIVER", "ORen_SHOWDOWN")]
+pluribus_df <- main_df[, c("Pluribus_BLIND", "Pluribus_PREFLOP", "Pluribus_FLOP", "Pluribus_TURN", "Pluribus_RIVER", "Pluribus_SHOWDOWN")]
+
+pluribus_df
+```
+
+```{r}
+
+folded_formula <- function(prev_stage, next_stage) {
+  return (prev_stage - next_stage)
+}
+
+markov_matrix_function <- function(df) {
+  non_na_counts <- rowSums(!is.na(df))
+  df$non_na_counts <- non_na_counts
+
+  reaches_to_preflop_stage <- sum(df[, "non_na_counts"] >= 1) # All stages should reach to preflop
+  reaches_to_flop_stage <- sum(df[, "non_na_counts"] >= 2) # Some stages might fold during preflop
+  reaches_to_turn_stage <- sum(df[, "non_na_counts"] >= 3)
+  reaches_to_river_stage <- sum(df[, "non_na_counts"] >= 4)
+  reaches_to_showdown_stage <- sum(df[, "non_na_counts"] >= 5)
+  reaches_to_end_stage <- sum(df[, "non_na_counts"] >= 6)
+  
+  folded_preflop <- folded_formula(reaches_to_preflop_stage, reaches_to_flop_stage)
+  folded_flop <- folded_formula(reaches_to_flop_stage, reaches_to_turn_stage)
+  folded_turn <- folded_formula(reaches_to_turn_stage, reaches_to_river_stage)
+  folded_river <- folded_formula(reaches_to_river_stage, reaches_to_showdown_stage)
+  lose_showdown <- folded_formula(reaches_to_showdown_stage, reaches_to_end_stage)
+  win_showdown <- reaches_to_end_stage
+  
+  folded_preflop_pct <- folded_preflop / reaches_to_preflop_stage
+  reaches_to_flop_pct <- reaches_to_flop_stage / reaches_to_preflop_stage
+  
+  folded_flop_pct <- folded_flop / reaches_to_flop_stage
+  reaches_to_turn_pct <- reaches_to_turn_stage / reaches_to_flop_stage
+  
+  folded_turn_pct <- folded_turn / reaches_to_turn_stage
+  reaches_to_river_pct <- reaches_to_river_stage / reaches_to_turn_stage
+  
+  folded_river_pct <- folded_river / reaches_to_river_stage
+  reaches_to_showdown_pct <- reaches_to_showdown_stage / reaches_to_river_stage
+  
+  lose_showdown_pct <- lose_showdown / reaches_to_showdown_stage
+  reaches_to_end_pct <- reaches_to_end_stage / reaches_to_showdown_stage
+  win_showdown_pct <- win_showdown / reaches_to_showdown_stage
+  
+  states <- c("preflop", "flop", "turn", "river", "showdown", "win", "lose", "fold")
+  markov_matrix <- matrix(0, nrow=length(states), ncol=length(states), dimnames=list(states, states))
+  markov_matrix["preflop", "flop"] <- round(reaches_to_flop_pct, digits=3)
+  markov_matrix["preflop", "fold"] <-  round(folded_preflop_pct, digits=3)
+  markov_matrix["flop", "turn"] <- round(reaches_to_turn_pct, digits=3)
+  markov_matrix["flop", "fold"] <- round(folded_flop_pct, digits=3)
+  markov_matrix["turn", "river"] <- round(reaches_to_river_pct, digits=3)
+  markov_matrix["turn", "fold"] <- round(folded_turn_pct, digits=3)
+  markov_matrix["river", "showdown"] <- round(reaches_to_showdown_pct, digits=3)
+  markov_matrix["river", "fold"] <- round(folded_river_pct, digits=3)
+  markov_matrix["showdown", "win"] <- round(win_showdown_pct, digits=3)
+  markov_matrix["showdown", "lose"] <- round(lose_showdown_pct, digits=3)
+  markov_matrix["win", "win"] <- 1
+  markov_matrix["lose", "lose"] <- 1
+  markov_matrix["fold", "fold"] <- 1
+  
+  return (markov_matrix)
+}
+
+df_name <- list("mrwhite_df", "gogo_df", "budd_df", "eddie_df", "bill_df", "mrblue_df", "mrblonde_df", "mrpink_df", "mrorange_df", "mrbrown_df", "hattori_df", "oren_df", "pluribus_df")
+df_list <- list(mrwhite_df, gogo_df, budd_df, eddie_df, bill_df, mrblue_df, mrblonde_df, mrpink_df, mrorange_df, mrbrown_df, hattori_df, oren_df, pluribus_df)
+
+i <- 1
+for (df in df_list) {
+  print(df_name[i])
+  print(markov_matrix_function(df))
+  i <- i + 1
+}
+
+
+```
+
+```{r}
+# Define the required columns
+required_columns <- c(
+    # Player-specific columns
+    "MrWhite_BLIND", "MrWhite_PREFLOP", "MrWhite_FLOP", "MrWhite_TURN", "MrWhite_RIVER", "MrWhite_SHOWDOWN",
+    "Gogo_BLIND", "Gogo_PREFLOP", "Gogo_FLOP", "Gogo_TURN", "Gogo_RIVER", "Gogo_SHOWDOWN",
+    "Budd_BLIND", "Budd_PREFLOP", "Budd_FLOP", "Budd_TURN", "Budd_RIVER", "Budd_SHOWDOWN",
+    "Eddie_BLIND", "Eddie_PREFLOP", "Eddie_FLOP", "Eddie_TURN", "Eddie_RIVER", "Eddie_SHOWDOWN",
+    "Bill_BLIND", "Bill_PREFLOP", "Bill_FLOP", "Bill_TURN", "Bill_RIVER", "Bill_SHOWDOWN",
+    "Pluribus_BLIND", "Pluribus_PREFLOP", "Pluribus_FLOP", "Pluribus_TURN", "Pluribus_RIVER", "Pluribus_SHOWDOWN",
+    "MrBlue_BLIND", "MrBlue_PREFLOP", "MrBlue_FLOP", "MrBlue_TURN", "MrBlue_RIVER", "MrBlue_SHOWDOWN",
+    "MrBlonde_BLIND", "MrBlonde_PREFLOP", "MrBlonde_FLOP", "MrBlonde_TURN", "MrBlonde_RIVER", "MrBlonde_SHOWDOWN",
+    "MrPink_BLIND", "MrPink_PREFLOP", "MrPink_FLOP", "MrPink_TURN", "MrPink_RIVER", "MrPink_SHOWDOWN",
+    "MrOrange_BLIND", "MrOrange_PREFLOP", "MrOrange_FLOP", "MrOrange_TURN", "MrOrange_RIVER", "MrOrange_SHOWDOWN",
+    "MrBrown_BLIND", "MrBrown_PREFLOP", "MrBrown_FLOP", "MrBrown_TURN", "MrBrown_RIVER", "MrBrown_SHOWDOWN",
+    "Hattori_BLIND", "Hattori_PREFLOP", "Hattori_FLOP", "Hattori_TURN", "Hattori_RIVER", "Hattori_SHOWDOWN",
+    "ORen_BLIND", "ORen_PREFLOP", "ORen_FLOP", "ORen_TURN", "ORen_RIVER", "ORen_SHOWDOWN",
+    # Hand ID column
+    "Hand_ID"
+)
+
+# Identify any missing columns
+missing_columns <- setdiff(required_columns, colnames(main_df))
+
+# Check for missing columns
+if (length(missing_columns) > 0) {
+    stop(paste("Missing columns:", paste(missing_columns, collapse = ", ")))
+} else {
+    print("All required columns are present.")
+}
+
+```
+
+```{r}
+# Iterate over each sub-dataframe in the list `df_list`
+for (i in seq_along(df_list)) {
+    df <- df_list[[i]]  # Extract the current dataframe
+    
+    # Check if the object is a data frame
+    if (!is.data.frame(df)) {
+        print(paste("Object at index", i, "is NOT a data frame."))
+    } else {
+        print(paste("Object at index", i, "is a valid data frame."))
+        print(paste("Number of rows:", nrow(df), "and columns:", ncol(df)))
+    }
+}
+
+```
+
+```{r}
+non_na_counts <- rowSums(!is.na(pluribus_df))
+pluribus_df$non_na_counts <- non_na_counts
+pluribus_df
+```
+
+```{r}
+
+blind_count <- sum(pluribus_df[, "non_na_counts"] == 2)
+print(blind_count)
+preflop_count <- sum(pluribus_df[, "non_na_counts"] == 3)
+print(preflop_count)
+flop_count <- sum(pluribus_df[, "non_na_counts"] == 4)
+turn_count <- sum(pluribus_df[, "non_na_counts"] == 5)
+river_count <- sum(pluribus_df[, "non_na_counts"] == 6)
+showdown_count <- sum(pluribus_df[, "non_na_counts"] == 7)
+
+blind_pct <- blind_count / nrow(pluribus_df)
+preflop_pct <- preflop_count / nrow(pluribus_df)
+flop_pct <- flop_count / nrow(pluribus_df)
+turn_pct <- turn_count / nrow(pluribus_df)
+river_pct <- river_count / nrow(pluribus_df)
+showdown_pct <- showdown_count / nrow(pluribus_df)
+
+blind_pct + preflop_pct + flop_pct + turn_pct + river_pct + showdown_pct
+```
+
+
+```{r}
+preflop_pct
+```
+
+```{r}
+flop_pct
+```
+
+```{r}
+turn_pct
+```
+
+```{r}
+river_pct
+```
+
+```{r}
+showdown_pct
+```
+
+```{r}
+pluribus_df
+
+```
+
+
+# Reaches to
+```{r}
+pluribus_df <- main_df[, c("Pluribus_BLIND", "Pluribus_PREFLOP", "Pluribus_FLOP", "Pluribus_TURN", "Pluribus_RIVER", "Pluribus_SHOWDOWN")]
+
+```
+
+```{r}
+
+pluribus_df
+```
+
+```{r}
+non_na_counts <- rowSums(!is.na(pluribus_df))
+pluribus_df$non_na_counts <- non_na_counts
+reaches_to_preflop_stage <- sum(pluribus_df[, "non_na_counts"] >= 2) # All stages should reach to preflop
+reaches_to_flop_stage <- sum(pluribus_df[, "non_na_counts"] >= 3) # Some stages might fold during preflop
+reaches_to_turn_stage <- sum(pluribus_df[, "non_na_counts"] >= 4)
+reaches_to_river_stage <- sum(pluribus_df[, "non_na_counts"] >= 5)
+reaches_to_showdown_stage <- sum(pluribus_df[, "non_na_counts"] >= 6)
+reaches_to_end_stage <- sum(pluribus_df[, "non_na_counts"] >= 7)
+```
+
+```{r}
+pluribus_df
+```
+
+# Folded Formula
+```{r}
+
+
+folded_preflop <- folded_formula(reaches_to_preflop_stage, reaches_to_flop_stage)
+folded_flop <- folded_formula(reaches_to_flop_stage, reaches_to_turn_stage)
+folded_turn <- folded_formula(reaches_to_turn_stage, reaches_to_river_stage)
+folded_river <- folded_formula(reaches_to_river_stage, reaches_to_showdown_stage)
+lose_showdown <- folded_formula(reaches_to_showdown_stage, reaches_to_end_stage)
+win_showdown <- reaches_to_end_stage
+```
+
+# Row Preflop done
+```{r}
+folded_preflop_pct <- folded_preflop / reaches_to_preflop_stage
+reaches_to_flop_pct <- reaches_to_flop_stage / reaches_to_preflop_stage
+folded_preflop_pct + reaches_to_flop_pct
+```
+
+# Row Flop done
+```{r}
+folded_flop_pct <- folded_flop / reaches_to_flop_stage
+reaches_to_turn_pct <- reaches_to_turn_stage / reaches_to_flop_stage
+folded_flop_pct + reaches_to_turn_pct
+```
+
+# Row Turn done
+```{r}
+folded_turn_pct <- folded_turn / reaches_to_turn_stage
+reaches_to_river_pct <- reaches_to_river_stage / reaches_to_turn_stage
+folded_turn_pct + reaches_to_river_pct
+```
+
+# Row River done
+```{r}
+folded_river_pct <- folded_river / reaches_to_river_stage
+reaches_to_showdown_pct <- reaches_to_showdown_stage / reaches_to_river_stage
+folded_river_pct + reaches_to_showdown_pct
+```
+
+# Row Showdown
+```{r}
+lose_showdown_pct <- lose_showdown / reaches_to_showdown_stage
+reaches_to_end_pct <- reaches_to_end_stage / reaches_to_showdown_stage
+win_showdown_pct <- win_showdown / reaches_to_showdown_stage
+
+lose_showdown_pct + win_showdown_pct
+```
+
+# Matrix
+```{r}
+states <- c("preflop", "flop", "turn", "river", "showdown", "win", "lose", "fold")
+markov_matrix <- matrix(0, nrow=length(states), ncol=length(states), dimnames=list(states, states))
+markov_matrix["preflop", "flop"] <- round(reaches_to_flop_pct, digits=3)
+markov_matrix["preflop", "fold"] <-  round(folded_preflop_pct, digits=3)
+markov_matrix["flop", "turn"] <- round(reaches_to_turn_pct, digits=3)
+markov_matrix["flop", "fold"] <- round(folded_flop_pct, digits=3)
+markov_matrix["turn", "river"] <- round(reaches_to_river_pct, digits=3)
+markov_matrix["turn", "fold"] <- round(folded_turn_pct, digits=3)
+markov_matrix["river", "showdown"] <- round(reaches_to_showdown_pct, digits=3)
+markov_matrix["river", "fold"] <- round(folded_river_pct, digits=3)
+markov_matrix["showdown", "win"] <- round(win_showdown_pct, digits=3)
+markov_matrix["showdown", "lose"] <- round(lose_showdown_pct, digits=3)
+markov_matrix["win", "win"] <- 1
+markov_matrix["lose", "lose"] <- 1
+markov_matrix["fold", "fold"] <- 1
+markov_matrix
+```
+```{r}
+colnames(pluribus_df)
+```
+
+```{r}
+pluribus_df
+
+```
+
+
+# Table with 2 Hands
+```{r}
+mrwhite_df <- main_df[, c("MrWhite_BLIND", "MrWhite_PREFLOP", "MrWhite_FLOP", "MrWhite_TURN", "MrWhite_RIVER", "MrWhite_SHOWDOWN")]
+df <- mrwhite_df
+
+non_na_counts <- rowSums(!is.na(df))
+df$non_na_counts <- non_na_counts
+reaches_to_preflop_stage <- sum(df[, "non_na_counts"] >= 2) # All stages should reach to preflop
+reaches_to_flop_stage <- sum(df[, "non_na_counts"] >= 3) # Some stages might fold during preflop
+reaches_to_turn_stage <- sum(df[, "non_na_counts"] >= 4)
+reaches_to_river_stage <- sum(df[, "non_na_counts"] >= 5)
+reaches_to_showdown_stage <- sum(df[, "non_na_counts"] >= 6)
+reaches_to_end_stage <- sum(df[, "non_na_counts"] >= 7)
+#reaches_to_end_stage <- sum(pluribus_df[, "non_na_counts"] >= 7)
+# reaches_to_end_stage
+
+colnames(df)
+
+
+```
