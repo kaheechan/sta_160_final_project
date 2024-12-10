@@ -1,0 +1,916 @@
+---
+title: "final_project_1"
+author: "Kahee Chan"
+date: "2024-10-29"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(stringr)
+library(lubridate)
+library(tidyr)
+```
+
+```{r}
+file_content <- readLines("merged_pluribus_52k.txt", warn = FALSE)
+full_text <- paste(file_content, collapse = "\n")
+
+# Split the text into individual games
+games <- str_split(full_text, "PokerStars", simplify = FALSE)[[1]][-1]
+
+# Function to process each game and extract parts
+process_game <- function(game_text) {
+  parts <- str_split(game_text, "\\n(?=\\*\\*\\*)", simplify = FALSE)[[1]]
+  game_data <- list()
+
+  for (part in parts) {
+    key <- str_extract(part, "(?<=\\*\\*\\* ).*?(?= \\*\\*\\*)")
+    value <- part
+    game_data[[key]] <- value
+  }
+
+  return(as.data.frame(t(unlist(game_data)), stringsAsFactors = FALSE))
+}
+
+# Apply the function to each game
+games_df_list <- lapply(games, process_game)
+
+# Combine all games into one dataframe
+all_games_df <- bind_rows(games_df_list)
+```
+
+```{r}
+col_name <- names(all_games_df)[1]
+all_games_df <- all_games_df %>%
+  mutate(
+    Hand_ID = str_extract(get(col_name), "Hand #(\\d+)"),
+    Date = ymd_hms(str_remove(str_extract(get(col_name), "\\d{4}/\\d{2}/\\d{2} \\d{2}:\\d{2}:\\d{2} ET"), " ET"))
+  ) %>%
+  rename(Original_Content = all_of(col_name))  # Remove the original detailed description column
+  #rename(Hand_ID = Hand_ID)      # Ensure Hand ID is properly named
+
+# Check the structure and the head of the DataFrame to ensure it's correct
+str(all_games_df)
+head(all_games_df)
+```
+
+```{r}
+extract_player_cards <- function(hole_cards_text) {
+  # Extract all lines that contain "Dealt to"
+  card_lines <- str_extract_all(hole_cards_text, "Dealt to [^\\[]+\\[[^\\]]+\\]")[[1]]
+  
+  # Extract player names and cards
+  players <- str_extract(card_lines, "(?<=Dealt to )[^\\[]+")
+  cards <- str_extract(card_lines, "\\[[^\\]]+\\]")
+  
+  # Create a named vector with player names as names and cards as values
+  names(cards) <- players
+  return(cards)
+}
+extract_players <- function(hole_cards_text) {
+  card_lines <- str_extract_all(hole_cards_text, "Dealt to [^\\[]+\\[[^\\]]+\\]")[[1]]
+  players <- str_extract(card_lines, "(?<=Dealt to )[^\\[]+")
+  return(str_squish(players))
+}
+player_cards_list <- lapply(all_games_df$`HOLE CARDS`, extract_player_cards)
+players <- extract_players(all_games_df$`HOLE CARDS`)
+# Apply the function to the 'HOLE CARDS' column of the DataFrame
+player_cards_df <- bind_rows(player_cards_list, .id = "Game_ID")
+
+all_games_df <- all_games_df %>% mutate(Game_ID = row_number())
+player_cards_df <- player_cards_df %>% mutate(Game_ID = row_number())
+
+# Merge the two DataFrames
+final_df <- left_join(all_games_df, player_cards_df, by = "Game_ID")
+```
+
+```{r}
+extract_preflop_actions <- function(hole_cards_text) {
+  # Split the 'HOLE CARDS' section into lines
+  lines <- str_split(hole_cards_text, "\n")[[1]]
+  
+  # Find the index of the last "Dealt to" line
+  last_dealt_index <- max(grep("Dealt to", lines))
+  
+  # Extract all lines after the last "Dealt to"
+  preflop_actions <- lines[(last_dealt_index + 1):length(lines)]
+  
+  # Keep the lines separated by newlines if you want to maintain the original text formatting
+  preflop_actions <- paste(preflop_actions, collapse = "\n")
+  
+  return(preflop_actions)
+}
+
+# Apply the function to the 'HOLE CARDS' column of the DataFrame
+final_df$PREFLOP <- sapply(all_games_df$`HOLE CARDS`, extract_preflop_actions)
+
+# Check the result
+head(final_df$PREFLOP)
+```
+
+# My Code
+```{r}
+pluribus_txt <- file_content
+pluribus_txt <- paste(pluribus_txt, collapse = "\n")
+pluribus_txt <- unlist(regmatches(pluribus_txt, gregexpr("\\w+: posts (small|big) blind \\d+", pluribus_txt, perl = TRUE)))
+pluribus_txt
+```
+
+```{r}
+# Convert the blind_posts vector into a data frame
+pluribus_blind_df <- tibble(Raw = pluribus_txt) %>%
+  # Extract Player, BlindType, and Amount using regex
+  extract(Raw, into = c("Player", "BlindType", "Amount"), 
+          regex = "(\\w+): posts (small|big) blind (\\d+)", remove = FALSE) %>%
+  mutate(Amount = as.numeric(Amount) * -1)  # Multiply by -1 to indicate deduction
+
+# Display the parsed data
+pluribus_blind_df
+```
+```{r}
+colnames(pluribus_blind_df)
+
+```
+# Blind df
+```{r}
+# Get all unique player names (can include new names like "Siri")
+blind_df_big <- pluribus_blind_df
+players <- unique(pluribus_blind_df$Player)
+
+# Create an empty dataframe with rows equal to number of blind postings and columns as players
+blind_df <- as.data.frame(matrix(NA, nrow = nrow(pluribus_blind_df)/2, ncol = length(players)))
+colnames(blind_df) <- players
+
+# Populate the dataframe
+for (i in 1:nrow(pluribus_blind_df)/2) {
+  player <- pluribus_blind_df$Player[i]
+  amount <- pluribus_blind_df$Amount[i]
+  blind_df[i, player] <- amount
+}
+
+# Replace NA with 0 if preferred
+blind_df[is.na(blind_df)] <- 0
+
+# Display the final dataframe
+blind_df
+```
+
+# Preflop
+```{r}
+dataset_preflop <- final_df$PREFLOP
+# write.table(dataset_preflop, file = "dataset_preflop.txt", row.names = FALSE, col.names = TRUE, sep = "\t")
+
+preflop_txt <- str_split(dataset_preflop, '\n')
+hands_list <- preflop_txt
+#preflop_txt
+```
+# Creating Empty DataFrame
+```{r}
+# Define player names
+player_names <- players
+
+# Define column names with "_Preflop" suffix for each player
+column_names <- paste0(player_names, "_PREFLOP")
+
+# Number of rows (games/hands) - we want 8 hands
+num_hands <- length(preflop_txt)
+
+# Create the NA-filled dataframe with 8 rows and 6 columns
+na_df <- as.data.frame(matrix(NA, nrow = num_hands, ncol = length(column_names)))
+
+# Set column names to be the player names with "_Preflop"
+colnames(na_df) <- column_names
+
+# Display the initialized dataframe
+print("Initialized NA DataFrame:")
+print(na_df)
+```
+
+```{r}
+# Function to extract player names and actions from a hand
+extract_actions <- function(hand_actions) {
+  actions <- list()
+  print("Current Hand Actions:")
+  print(hand_actions)
+  
+  # Iterate through each action line in the hand
+  for (action_line in hand_actions) {
+    print("Current Action Line:")
+    print(action_line)
+    
+    # Match the pattern "<Player>: <action>"
+    match <- str_match(action_line, "^(\\w+):\\s*(.*)$")
+    print("Match Results:")
+    print(match)
+    
+    if (!is.na(match[1,1])) {
+      player <- match[1,2]
+      action <- match[1,3]
+      actions[[player]] <- action
+      print(paste("Extracted Player:", player))
+      print(paste("Extracted Action:", action))
+    }
+  }
+  
+  print("Actions Extracted for Current Hand:")
+  print(actions)
+  return(actions)
+}
+```
+
+```{r}
+# Load necessary library
+library(stringr)
+
+# Define player names and initialize the dataframe with NA
+player_names <- players
+column_names <- paste0(player_names, "_PREFLOP")
+num_hands <- length(preflop_txt)
+
+# Initialize the dataframe
+preflop_df <- as.data.frame(matrix(NA, nrow = num_hands, ncol = length(column_names)))
+colnames(preflop_df) <- column_names
+
+# Function to extract player names and actions from a hand
+extract_actions <- function(hand_actions) {
+  actions <- list()
+  
+  # Iterate through each action line in the hand
+  for (action_line in hand_actions) {
+    # Match the pattern "<Player>: <action>"
+    match <- str_match(action_line, "^(\\w+):\\s*(.*)$")
+    
+    # If a match is found, assign action to the corresponding player
+    if (!is.na(match[1,1])) {
+      player <- match[1,2]
+      action <- match[1,3]
+      actions[[player]] <- action
+    }
+  }
+  
+  return(actions)
+}
+
+# Populate the dataframe with extracted actions
+for (i in 1:num_hands) {
+  current_hand <- hands_list[[i]]
+  
+  # Ensure current_hand is split by line if it's a single string
+  current_hand_lines <- unlist(strsplit(current_hand, "\n"))
+  actions <- extract_actions(current_hand_lines)
+  
+  for (player in names(actions)) {
+    column_name <- paste0(player, "_Preflop")
+    
+    # Check if the column exists and populate action
+    if (column_name %in% colnames(preflop_df)) {
+      preflop_df[i, column_name] <- actions[[player]]
+    }
+  }
+}
+
+# Display the final populated dataframe
+print("Final Populated Preflop DataFrame with Actions:")
+print(preflop_df)
+preflop_df_readable <- preflop_df
+
+PFprocess_data_frame <- function(df) {
+  # Apply a function over each element in the DataFrame
+  df_processed <- df %>%
+    mutate(across(everything(), ~case_when(
+      str_detect(., "fold") ~ as.character(NA),  # Handle 'fold' by returning NA
+      str_detect(., "checks") ~ "0",              # Handle 'check' by returning "0"
+      TRUE ~ as.character(ifelse(str_extract(., "\\d+\\s*$") != "", str_extract(., "\\d+\\s*$"), NA))  # Extract the last number
+    )))
+  
+  return(df_processed)
+}
+preflop_df <- PFprocess_data_frame(preflop_df)
+```
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(stringr)
+
+# Display the original Action DataFrame
+print("Original Preflop DataFrame (Players' Actions per Hand):")
+print(preflop_df)
+
+# Transformation function based on rules
+transform_action <- function(action) {
+  if (is.na(action)) {
+    return(NA_real_)
+  }
+  
+  # Convert "folds" to NA
+  if (action == "folds") {
+    return(NA)
+  }
+  
+  # Convert "raises x to y" to x - y
+  if (str_detect(action, "^raises\\s+\\d+\\s+to\\s+\\d+")) {
+    matches <- str_match(action, "^raises\\s+(\\d+)\\s+to\\s+(\\d+)")
+    x <- as.numeric(matches[2])
+    y <- as.numeric(matches[3])
+    return(x - y)
+  }
+  
+  # Convert "calls z" to -z
+  if (str_detect(action, "^calls\\s+\\d+")) {
+    z <- as.numeric(str_extract(action, "\\d+"))
+    return(-z)
+  }
+  
+  # Convert "returns x" to x
+  if (str_detect(action, "^returns\\s+\\d+")) {
+    a <- as.numeric(str_extract(action, "\\d+"))
+    return(a)
+  }
+  
+  # Convert "collected x" to x
+  if (str_detect(action, "^collected\\s+\\d+")) {
+    b <- as.numeric(str_extract(action, "\\d+"))
+    return(b)
+  }
+  
+  # For other actions, set to NA
+  return(NA_real_)
+}
+
+# Apply the transformation function to create new_preflop_df
+new_preflop_df <- preflop_df %>%
+  mutate(across(everything(), ~ sapply(., transform_action)))
+
+# Assign row names to represent each hand
+rownames(new_preflop_df) <- paste0("Hand_", 1:nrow(new_preflop_df))
+
+# Display the transformed new_preflop_df
+print("Transformed Preflop DataFrame (new_preflop_df):")
+print(new_preflop_df)
+
+```
+
+```{r}
+preflop_df
+
+```
+# PREFLOP NEW
+```{r}
+dataset <- final_df$`PREFLOP`
+
+extract_players <- function(hand) {
+  if (is.na(hand)) {
+    return(NULL)
+  }
+  # Use regex to find all occurrences of "<Name>:"
+  players <- str_extract_all(hand, "(?<=\n|^)\\w+(?=:)")[[1]]
+  return(players)
+}
+
+# Apply the function to all hands and get unique names from actions
+players_from_actions <- unique(unlist(lapply(dataset, extract_players)))
+
+# Define additional players who may not appear in the actions
+additional_players <- c("MrWhite", "Pluribus")
+
+# Combine all players and ensure uniqueness
+player_list <- unique(c(players_from_actions, additional_players))
+
+column_names <- paste0(player_list, "_PREFLOP")
+
+# Display the unique players
+print("Unique Players:")
+print(player_list)
+
+num_hands <- length(dataset)
+
+# Initialize the dataframe with NA_real_ to ensure numeric columns
+action_df <- as.data.frame(matrix(NA_real_, nrow = num_hands, ncol = length(column_names)))
+
+# Assign column names
+colnames(action_df) <- column_names
+
+# Assign row names as Hand_1 to Hand_8
+rownames(action_df) <- paste0("Hand_", 1:num_hands)
+
+# Display the initialized dataframe
+print("Initialized Action DataFrame:")
+print(action_df)
+
+for (i in 1:num_hands) {
+  current_hand <- dataset[i]
+  
+  if (is.na(current_hand)) {
+    # If the hand is NA, leave the entire row as NA
+    next
+  }
+  
+  # Split the hand string into individual action lines
+  action_lines <- unlist(str_split(current_hand, "\n"))
+  
+  # Remove the first line that starts with "*** FLOP ***"
+  action_lines <- action_lines[!str_detect(action_lines, "^\\*\\*\\*")]
+  
+  # Initialize a named list to store actions for the current hand
+  actions_list <- list()
+  
+  # Iterate through each action line
+  for (line in action_lines) {
+    # Extract the player name and action using regex
+    match <- str_match(line, "^(\\w+):\\s*(.*)$")
+    
+    if (!is.na(match[1,1])) {
+      player <- match[1,2]
+      action <- match[1,3]
+      
+      # Handle actions based on their type
+      if (tolower(action) == "checks") {
+        # If the action is "checks", set to 0
+        actions_list[[player]] <- 0
+      } else if (str_detect(action, "^raises\\s+\\d+\\s+to\\s+\\d+$")) {
+        # If the action is "raises x to y", compute y - x
+        numbers <- str_extract_all(action, "\\d+")[[1]]
+        if (length(numbers) == 2) {
+          x <- as.numeric(numbers[1])
+          y <- as.numeric(numbers[2])
+          net_raise <- y - x  # Represents the increase
+          actions_list[[player]] <- net_raise
+        } else {
+          # If pattern doesn't match, set to NA
+          actions_list[[player]] <- NA
+        }
+      } else if (str_detect(action, "^calls\\s+\\d+$")) {
+        # If the action is "calls z", set to -z
+        z <- as.numeric(str_extract(action, "\\d+"))
+        actions_list[[player]] <- -z
+      } else if (str_detect(action, "^bets\\s+\\d+$")) {
+        # If the action is "bets z", set to -z (similar to calls)
+        z <- as.numeric(str_extract(action, "\\d+"))
+        actions_list[[player]] <- -z
+      } else {
+        # For any other actions, set to NA or handle as needed
+        actions_list[[player]] <- NA
+      }
+    }
+  }
+  
+  # Populate the dataframe for the current hand
+  for (player in player_list) {
+    column_name <- paste0(player, "_PREFLOP")
+    
+    if (player %in% names(actions_list)) {
+      action_value <- actions_list[[player]]
+      
+      # Assign the action value to the dataframe
+      action_df[i, column_name] <- action_value
+    } else {
+      # If the player did not act in this hand, leave as NA
+      action_df[i, column_name] <- NA
+    }
+  }
+}
+
+print("Populated Action DataFrame:")
+preflop_df <- action_df
+new_preflop_df <- action_df
+print(preflop_df)
+```
+
+
+```{r}
+final_df
+```
+# Flop
+
+
+```{r}
+dataset <- final_df$`FLOP`
+
+extract_players <- function(hand) {
+  if (is.na(hand)) {
+    return(NULL)
+  }
+  # Use regex to find all occurrences of "<Name>:"
+  players <- str_extract_all(hand, "(?<=\n|^)\\w+(?=:)")[[1]]
+  return(players)
+}
+
+# Apply the function to all hands and get unique names from actions
+players_from_actions <- unique(unlist(lapply(dataset, extract_players)))
+
+# Define additional players who may not appear in the actions
+additional_players <- c("MrWhite", "Pluribus")
+
+# Combine all players and ensure uniqueness
+player_list <- unique(c(players_from_actions, additional_players))
+
+# Append "::" to each player name for column naming
+column_names <- paste0(player_list, "_FLOP")
+
+# Display the unique players
+print("Unique Players:")
+print(player_list)
+
+num_hands <- length(dataset)
+
+# Initialize the dataframe with NA_real_ to ensure numeric columns
+action_df <- as.data.frame(matrix(NA_real_, nrow = num_hands, ncol = length(column_names)))
+
+# Assign column names
+colnames(action_df) <- column_names
+
+# Assign row names as Hand_1 to Hand_8
+rownames(action_df) <- paste0("Hand_", 1:num_hands)
+
+# Display the initialized dataframe
+print("Initialized Action DataFrame:")
+print(action_df)
+
+for (i in 1:num_hands) {
+  current_hand <- dataset[i]
+  
+  if (is.na(current_hand)) {
+    # If the hand is NA, leave the entire row as NA
+    next
+  }
+  
+  # Split the hand string into individual action lines
+  action_lines <- unlist(str_split(current_hand, "\n"))
+  
+  # Remove the first line that starts with "*** FLOP ***"
+  action_lines <- action_lines[!str_detect(action_lines, "^\\*\\*\\*")]
+  
+  # Initialize a named list to store actions for the current hand
+  actions_list <- list()
+  
+  # Iterate through each action line
+  for (line in action_lines) {
+    # Extract the player name and action using regex
+    match <- str_match(line, "^(\\w+):\\s*(.*)$")
+    
+    if (!is.na(match[1,1])) {
+      player <- match[1,2]
+      action <- match[1,3]
+      
+      # Handle actions based on their type
+      if (tolower(action) == "checks") {
+        # If the action is "checks", set to 0
+        actions_list[[player]] <- 0
+      } else if (str_detect(action, "^raises\\s+\\d+\\s+to\\s+\\d+$")) {
+        # If the action is "raises x to y", compute y - x
+        numbers <- str_extract_all(action, "\\d+")[[1]]
+        if (length(numbers) == 2) {
+          x <- as.numeric(numbers[1])
+          y <- as.numeric(numbers[2])
+          net_raise <- y - x  # Represents the increase
+          actions_list[[player]] <- net_raise
+        } else {
+          # If pattern doesn't match, set to NA
+          actions_list[[player]] <- NA
+        }
+      } else if (str_detect(action, "^calls\\s+\\d+$")) {
+        # If the action is "calls z", set to -z
+        z <- as.numeric(str_extract(action, "\\d+"))
+        actions_list[[player]] <- -z
+      } else if (str_detect(action, "^bets\\s+\\d+$")) {
+        # If the action is "bets z", set to -z (similar to calls)
+        z <- as.numeric(str_extract(action, "\\d+"))
+        actions_list[[player]] <- -z
+      } else {
+        # For any other actions, set to NA or handle as needed
+        actions_list[[player]] <- NA
+      }
+    }
+  }
+  
+  # Populate the dataframe for the current hand
+  for (player in player_list) {
+    column_name <- paste0(player, "_FLOP")
+    
+    if (player %in% names(actions_list)) {
+      action_value <- actions_list[[player]]
+      
+      # Assign the action value to the dataframe
+      action_df[i, column_name] <- action_value
+    } else {
+      # If the player did not act in this hand, leave as NA
+      action_df[i, column_name] <- NA
+    }
+  }
+}
+
+print("Populated Action DataFrame:")
+flop_df <- action_df
+print(flop_df)
+```
+
+# Turn
+```{r}
+dataset <- final_df$TURN
+print(dataset)
+
+# Define players and column names
+player_list <- players
+column_names <- paste0(player_list, "_TURN")
+num_hands <- length(dataset)
+
+# Initialize the dataframe with NA values
+turn_df <- as.data.frame(matrix(NA_real_, nrow = num_hands, ncol = length(column_names)))
+colnames(turn_df) <- column_names
+rownames(turn_df) <- paste0("Hand_", 1:num_hands)
+
+# Function to extract player actions for each hand
+extract_actions <- function(hand) {
+  actions <- list()
+  
+  # Process each line in the hand data
+  for (line in hand) {
+    # Match "<Player>: <action>" format
+    match <- str_match(line, "^(\\w+):\\s*(.*)$")
+    
+    # Extract player and action if match is found
+    if (!is.na(match[1,1])) {
+      player <- match[1,2]
+      action <- match[1,3]
+      
+      # Define rules for interpreting actions
+      if (tolower(action) == "checks") {
+        actions[[player]] <- 0
+      } else if (str_detect(action, "^raises\\s+\\d+\\s+to\\s+\\d+$")) {
+        # Parse "raises x to y" as y - x
+        nums <- as.numeric(str_extract_all(action, "\\d+")[[1]])
+        if (length(nums) == 2) {
+          actions[[player]] <- nums[2] - nums[1]
+        } else {
+          actions[[player]] <- NA
+        }
+      } else if (str_detect(action, "^calls\\s+\\d+$")) {
+        # Parse "calls z" as -z
+        z <- as.numeric(str_extract(action, "\\d+"))
+        actions[[player]] <- -z
+      } else if (str_detect(action, "^bets\\s+\\d+$")) {
+        # Parse "bets z" as -z
+        z <- as.numeric(str_extract(action, "\\d+"))
+        actions[[player]] <- -z
+      } else {
+        actions[[player]] <- NA
+      }
+    }
+  }
+  return(actions)
+}
+
+# Populate turn_df with actions
+for (i in 1:num_hands) {
+  current_hand <- dataset[i]
+  
+  # Skip if current hand is NA
+  if (is.na(current_hand)) next
+  
+  # Split each hand by line
+  action_lines <- unlist(str_split(current_hand, "\n"))
+  
+  # Remove "*** TURN ***" marker if present
+  action_lines <- action_lines[!str_detect(action_lines, "^\\*\\*\\* TURN \\*\\*\\*")]
+  
+  # Extract actions for current hand
+  actions <- extract_actions(action_lines)
+  
+  # Populate turn_df for each player action
+  for (player in player_list) {
+    column_name <- paste0(player, "_TURN")
+    turn_df[i, column_name] <- ifelse(player %in% names(actions), actions[[player]], NA)
+  }
+}
+
+print("Populated TURN DataFrame:")
+print(turn_df)
+```
+
+# River
+```{r}
+dataset <- final_df$RIVER
+
+player_list <- players
+column_names <- paste0(player_list, "_RIVER")
+num_hands <- length(dataset)
+
+# Initialize the dataframe with NA values
+river_df <- as.data.frame(matrix(NA_real_, nrow = num_hands, ncol = length(column_names)))
+colnames(river_df) <- column_names
+rownames(river_df) <- paste0("Hand_", 1:num_hands)
+
+extract_actions <- function(hand) {
+  actions <- list()
+  
+  # Process each line in the hand data
+  for (line in hand) {
+    # Match "<Player>: <action>" format
+    match <- str_match(line, "^(\\w+):\\s*(.*)$")
+    
+    # Extract player and action if match is found
+    if (!is.na(match[1,1])) {
+      player <- match[1,2]
+      action <- match[1,3]
+      
+      # Define rules for interpreting actions
+      if (tolower(action) == "checks") {
+        actions[[player]] <- 0
+      } else if (str_detect(action, "^raises\\s+\\d+\\s+to\\s+\\d+$")) {
+        # Parse "raises x to y" as y - x
+        nums <- as.numeric(str_extract_all(action, "\\d+")[[1]])
+        if (length(nums) == 2) {
+          actions[[player]] <- nums[2] - nums[1]
+        } else {
+          actions[[player]] <- NA
+        }
+      } else if (str_detect(action, "^calls\\s+\\d+$")) {
+        # Parse "calls z" as -z
+        z <- as.numeric(str_extract(action, "\\d+"))
+        actions[[player]] <- -z
+      } else if (str_detect(action, "^bets\\s+\\d+$")) {
+        # Parse "bets z" as -z
+        z <- as.numeric(str_extract(action, "\\d+"))
+        actions[[player]] <- -z
+      } else {
+        actions[[player]] <- NA
+      }
+    }
+  }
+  return(actions)
+}
+
+for (i in 1:num_hands) {
+  current_hand <- dataset[i]
+  
+  # Skip if current hand is NA
+  if (is.na(current_hand)) next
+  
+  # Split each hand by line
+  action_lines <- unlist(str_split(current_hand, "\n"))
+  
+  # Remove "*** RIVER ***" marker if present
+  action_lines <- action_lines[!str_detect(action_lines, "^\\*\\*\\* RIVER \\*\\*\\*")]
+  
+  # Extract actions for current hand
+  actions <- extract_actions(action_lines)
+  
+  # Populate river_df for each player action
+  for (player in player_list) {
+    column_name <- paste0(player, "_RIVER")
+    river_df[i, column_name] <- ifelse(player %in% names(actions), actions[[player]], NA)
+  }
+}
+
+# Display the populated RIVER Action DataFrame
+print("Populated RIVER DataFrame:")
+print(river_df)
+
+
+```
+
+```{r}
+# Display the populated Action DataFrame
+print("Populated Action DataFrame:")
+river_df
+```
+
+```{r}
+dataset <- final_df$SHOWDOWN
+dataset
+```
+
+# Showdown
+```{r}
+library(tidyverse)
+dataset <- final_df$SHOWDOWN
+
+player_list <- players
+
+action_columns <- paste0(player_list, "_SHOWDOWN")
+
+all_columns <- action_columns
+
+print("Unique Players:")
+print(player_list)
+
+num_hands <- length(dataset)
+
+action_df <- as.data.frame(matrix(NA_real_, nrow = num_hands, ncol = length(all_columns)))
+
+# Assign column names
+colnames(action_df) <- all_columns
+
+# Assign row names as Hand_1 to Hand_8
+rownames(action_df) <- paste0("Hand_", 1:num_hands)
+
+# Display the initialized dataframe
+print("Initialized Action DataFrame:")
+print(action_df)
+
+# Iterate over each hand
+for (i in 1:num_hands) {
+  current_hand <- dataset[i]
+  
+  if (is.na(current_hand)) {
+    # If the hand is NA, leave the entire row as NA
+    next
+  }
+  
+  # Split the hand string into individual lines
+  action_lines <- unlist(str_split(current_hand, "\n"))
+  
+  # Remove lines that start with "***" (e.g., "*** SHOWDOWN ***")
+  action_lines <- action_lines[!str_detect(action_lines, "^\\*\\*\\*")]
+  
+  # Initialize a named list to store collected amounts
+  collected_list <- list()
+  
+  # Iterate through each line
+  for (line in action_lines) {
+    # Check if the line matches "<Name> collected <amount> from pot"
+    match_collected <- str_match(line, "^(\\w+) collected ([0-9.]+) from pot$")
+    
+    if (!is.na(match_collected[1,1])) {
+      player <- match_collected[1,2]
+      amount <- as.numeric(match_collected[1,3])
+      
+      # Assign to the player's column
+      column_name <- paste0(player, "_SHOWDOWN")
+      
+      if (column_name %in% colnames(action_df)) {
+        collected_list[[player]] <- amount
+      }
+    }
+  }
+  
+  # Populate the dataframe for the current hand
+  for (player in player_list) {
+    column_name <- paste0(player, "_SHOWDOWN")
+    
+    if (player %in% names(collected_list)) {
+      action_df[i, column_name] <- collected_list[[player]]
+    } else {
+      # If the player did not collect, leave as NA
+      action_df[i, column_name] <- NA
+    }
+  }
+}
+
+print("Final Action DataFrame:")
+print(action_df)
+showdown_df <- action_df
+```
+
+```{r}
+main_df <- cbind(blind_df, preflop_df, flop_df, turn_df, river_df, showdown_df)
+main_df
+```
+```{r}
+colnames(main_df)
+
+```
+
+```{r}
+main_df <- main_df[, !(names(main_df) %in% c("Flop"))]
+# colnames(main_df) <- c("Bill_Blind", "Budd_Blind", "Eddie_Blind", "Gogo_Blind", "MrWhite_Blind", "Pluribus_Blind",
+#  "Bill_Preflop", "Budd_Preflop", "Eddie_Preflop", "Gogo_Preflop", "MrWhite_Preflop", "Pluribus_Preflop", "Budd_Flop", "Eddie_Flop", "Bill_Flop", "Pluribus_Flop", "MrWhite_Flop", "Gogo_Flop", 
+#                       "Eddie_Turn", "Gogo_Turn", "Budd_Turn", "Bill_Turn", "MrWhite_Turn", "Pluribus_Turn", 
+#                       "Budd_River", "Bill_River", "MrWhite_River", "Pluribus_River", "Eddie_River", "Gogo_River", #"Eddie_Showdown", "Gogo_Showdown", "Budd_Showdown", "Bill_Showdown", "MrWhite_Showdown", "Pluribus_Showdown")
+
+print(main_df)
+#write.csv(main_df, 'main_poker.csv')
+```
+```{r}
+col_name_blind <- colnames(main_df)[1:13]
+col_name_blind
+```
+
+```{r}
+col_name_blind <- paste0(col_name_blind, "_BLIND")
+col_name_blind
+```
+
+```{r}
+colnames(main_df)[1:13] <- col_name_blind
+colnames(main_df)
+
+```
+
+```{r}
+hand_id <- final_df$Hand_ID
+main_df$Hand_ID <- as.integer(substr(hand_id, nchar(hand_id) - 4, nchar(hand_id)))
+final_df$Hand_ID <- as.integer(substr(hand_id, nchar(hand_id) - 4, nchar(hand_id)))
+main_df
+```
+
+```{r}
+write.csv(c(final_df, main_df), "double_df.csv")
+```
+
