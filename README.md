@@ -4,7 +4,7 @@
 - Final Report PDF: [STA 160 Final part 1 _ Pluribus.AI.pdf](https://github.com/user-attachments/files/18071770/STA.160.Final.part.1._.Pluribus.AI.pdf)
 
 ## Contributions
-1. Charles Zhang - Charles Zhang - GPT Model,  K-means, PokerTracker, Data Cleaning, Compiling Dataframe, EDA, Presentation 1 & 2
+1. Charles Zhang - GPT Model,  K-means, PokerTracker, Data Cleaning, Compiling Dataframe, EDA, Presentation 1 & 2
 2. Kahee Chan - Markov Chain,  Compiling Dataframe, Report Writeup, Presentation 1 & 2, Github
 3. Ivan Louize Winoto - Literature Review for Presentation 1, Introduction for Final Report
 4. Eyoel Abraha - Graphs for Presentation 2
