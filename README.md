@@ -1,7 +1,7 @@
 # STA 160 Final Project
 ## Poker AI Betting Strategies & Analysis of Incomplete Information Games by Charles Zhang, Kahee Chan, Ivan Louize Winoto, Eyoel Abraha
 - Contains general code, markov model code and our dataset
-- Final PDF: [STA 160 Final part 1 _ Pluribus.AI.pdf](https://github.com/user-attachments/files/18071770/STA.160.Final.part.1._.Pluribus.AI.pdf)
+- Final Report PDF: [STA 160 Final part 1 _ Pluribus.AI.pdf](https://github.com/user-attachments/files/18071770/STA.160.Final.part.1._.Pluribus.AI.pdf)
 
 ## Contributions
 1. Charles Zhang - Charles Zhang - GPT Model,  K-means, PokerTracker, Data Cleaning, Compiling Dataframe, EDA, Presentation 1 & 2
